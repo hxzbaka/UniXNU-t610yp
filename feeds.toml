@@ -1,0 +1,15 @@
+# UMS512 / SharkL5Pro T610YP device repository.
+# The Action build fetches the public Apple source tag. A local checkout can be
+# supplied with the unixnu local-module override during source qualification.
+
+[[source]]
+name = "xnu"
+kind = "refer"
+git = "https://github.com/apple-oss-distributions/xnu.git"
+ref = "xnu-8796.141.3"
+commit = "1b191cb58250d0705d8a51287127505aa4bc0789"
+darwin = "22.5.0"
+version = "8796.141.3"
+driverkit_tag = "xnu-8796.101.5"
+trustcache_tag = "xnu-8796.101.5"
+

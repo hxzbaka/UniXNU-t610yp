@@ -1,0 +1,166 @@
+name: XNU 8796 kernel
+
+on:
+  workflow_dispatch:
+    inputs:
+      unixnu_repository:
+        description: UniXNU base repository (owner/name)
+        required: true
+        default: hxzbaka/UniXNU
+      unixnu_ref:
+        description: UniXNU base repository ref
+        required: true
+        default: main
+      kernel_config:
+        description: XNU kernel configuration
+        required: true
+        default: DEVELOPMENT
+      keep_going:
+        description: Continue after compile errors
+        required: true
+        default: "false"
+  push:
+    branches: [main]
+    paths:
+      - "board.toml"
+      - "configs/**"
+      - "feeds.toml"
+      - "patches/**"
+      - "scripts/**"
+      - ".github/workflows/xnu-8796.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: xnu-8796-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    # XNU 8796 uses the Xcode 15-era iig ABI. Do not move this job to macos-26.
+    runs-on: macos-14
+    timeout-minutes: 240
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: 1
+      HOMEBREW_NO_INSTALL_CLEANUP: 1
+      HOMEBREW_NO_ENV_HINTS: 1
+      DEVICE_DIR: ${{ github.workspace }}/device
+      DEFCONFIG: t610yp_defconfig
+      KERNEL_CONFIG: ${{ inputs.kernel_config || 'DEVELOPMENT' }}
+
+    steps:
+      - name: Check out UniXNU base
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.unixnu_repository || 'hxzbaka/UniXNU' }}
+          ref: ${{ inputs.unixnu_ref || 'main' }}
+          path: unixnu-base
+          persist-credentials: false
+
+      - name: Check out T610YP device tree
+        uses: actions/checkout@v4
+        with:
+          path: device
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Select Xcode 15
+        run: |
+          set -euo pipefail
+          xcode_app=$(find /Applications -maxdepth 1 -type d -name 'Xcode_15*.app' | sort -V | head -n 1)
+          if [ -z "$xcode_app" ]; then
+            xcode_app=$(find /Applications -maxdepth 1 -type d -name 'Xcode_14*.app' | sort -V | head -n 1)
+          fi
+          test -n "$xcode_app" || { echo "Xcode 14/15 not installed" >&2; exit 1; }
+          echo "DEVELOPER_DIR=$xcode_app/Contents/Developer" >> "$GITHUB_ENV"
+          sudo xcode-select -s "$xcode_app"
+          xcodebuild -version
+          xcrun --find iig
+          xcrun --sdk iphoneos --show-sdk-version
+
+      - name: Install build dependencies
+        run: |
+          brew install cmake ninja unifdef jq
+          python3 --version
+          for tool in git make clang cmake ninja unifdef xcodebuild; do
+            command -v "$tool" >/dev/null || { echo "missing $tool" >&2; exit 1; }
+          done
+
+      - name: Select T610YP configuration
+        working-directory: unixnu-base
+        env:
+          UNIXNU_DEVICE: ${{ env.DEVICE_DIR }}
+        run: |
+          chmod +x unixnu
+          ./unixnu -D "$UNIXNU_DEVICE" defconfig "$DEFCONFIG"
+          ./unixnu -D "$UNIXNU_DEVICE" status
+
+      - name: Build XNU 8796 (compile only)
+        working-directory: unixnu-base
+        env:
+          UNIXNU_DEVICE: ${{ env.DEVICE_DIR }}
+          MAKEFLAGS: ${{ inputs.keep_going == 'true' && '-k' || '' }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # The normal "build kernel" command also performs IPSW prelinking.
+          # T610YP has no qualified iOS kernelcache yet, so invoke the same
+          # kernel build path with only the prelink phase suppressed.
+          python3 - <<'PY'
+          from scripts.unixnu import cli, kernel
+          kernel.prelink = lambda ctx: None
+          cli.main(['-D', '${{ env.DEVICE_DIR }}', 'build', 'kernel'])
+          PY
+
+      - name: Validate generated ADT
+        working-directory: unixnu-base
+        run: |
+          python3 "$DEVICE_DIR/scripts/make-t610yp-adt.py" \
+            --output "$RUNNER_TEMP/t610yp.adt" \
+            --dram-size 0x40000000 \
+            --owned-memory-size 0x10000000 \
+            --cpu-regs 0,0x100,0x200,0x300,0x400,0x500,0x600,0x700 \
+            --unique-chip-id 0x554d533531325450
+
+      - name: Collect kernel and build tree
+        if: always()
+        working-directory: unixnu-base
+        run: |
+          set +e
+          mkdir -p "$RUNNER_TEMP/t610yp-kernel"
+          find "out/t610yp/tree/build/xnu" -type f \( \
+            -name 'mach.development.*' -o -name 'kernel.development.*' -o -name '*.unstripped.noctf' \) \
+            -exec cp -p {} "$RUNNER_TEMP/t610yp-kernel/" \; 2>/dev/null
+          cp -p "$RUNNER_TEMP/t610yp.adt" "$RUNNER_TEMP/t610yp-kernel/" 2>/dev/null
+          cp -R "out/t610yp/logs" "$RUNNER_TEMP/t610yp-kernel/" 2>/dev/null
+          SDK=$(xcrun --sdk macosx --show-sdk-path)
+          mkdir -p "$RUNNER_TEMP/sdk-kernel-platform"
+          cp -R "$SDK/System/Library/Frameworks/Kernel.framework/Versions/A/PrivateHeaders/platform" \
+            "$RUNNER_TEMP/sdk-kernel-platform/" 2>/dev/null || true
+          tar czf "$RUNNER_TEMP/t610yp-buildtree.tgz" \
+            --exclude='*.o' --exclude='*.cpo' --exclude='*.a' --exclude='*.dSYM' \
+            --exclude='*.unstripped' --exclude='.git' \
+            -C . build/xnu .cache/fakeroot/usr/local/include refer/xnu patches scripts \
+            -C "$RUNNER_TEMP" sdk-kernel-platform 2>/dev/null || true
+          find "$RUNNER_TEMP/t610yp-kernel" -maxdepth 2 -type f -print || true
+
+      - name: Upload XNU 8796 kernel artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xnu-8796-t610yp-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/t610yp-kernel
+            ${{ runner.temp }}/t610yp-buildtree.tgz
+          if-no-files-found: warn
+          retention-days: 14
+
