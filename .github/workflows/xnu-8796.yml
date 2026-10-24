@@ -101,8 +101,8 @@ jobs:
           UNIXNU_DEVICE: ${{ env.DEVICE_DIR }}
         run: |
           chmod +x unixnu
-          ./unixnu -D "$UNIXNU_DEVICE" defconfig "$DEFCONFIG"
-          ./unixnu -D "$UNIXNU_DEVICE" status
+          ./unixnu defconfig -D "$UNIXNU_DEVICE" "$DEFCONFIG"
+          ./unixnu status -D "$UNIXNU_DEVICE"
 
       - name: Build XNU 8796 (compile only)
         working-directory: unixnu-base
@@ -118,7 +118,7 @@ jobs:
           python3 - <<'PY'
           from scripts.unixnu import cli, kernel
           kernel.prelink = lambda ctx: None
-          cli.main(['-D', '${{ env.DEVICE_DIR }}', 'build', 'kernel'])
+          cli.main(['build', '-D', '${{ env.DEVICE_DIR }}', 'kernel'])
           PY
 
       - name: Validate generated ADT
