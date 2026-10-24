@@ -6,7 +6,7 @@ on:
       unixnu_repository:
         description: UniXNU base repository (owner/name)
         required: true
-        default: hxzbaka/UniXNU
+        default: hxzbaka/testios
       unixnu_ref:
         description: UniXNU base repository ref
         required: true
