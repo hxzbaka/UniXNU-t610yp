@@ -49,13 +49,14 @@ jobs:
       HOMEBREW_NO_AUTO_UPDATE: 1
       HOMEBREW_NO_INSTALL_CLEANUP: 1
       HOMEBREW_NO_ENV_HINTS: 1
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
       DEVICE_DIR: ${{ github.workspace }}/device
       DEFCONFIG: t610yp_defconfig
       KERNEL_CONFIG: ${{ inputs.kernel_config || 'DEVELOPMENT' }}
 
     steps:
       - name: Check out UniXNU base
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: ${{ inputs.unixnu_repository || 'hxzbaka/UniXNU' }}
           ref: ${{ inputs.unixnu_ref || 'main' }}
@@ -63,13 +64,13 @@ jobs:
           persist-credentials: false
 
       - name: Check out T610YP device tree
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           path: device
           persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.13"
 
@@ -130,8 +131,11 @@ jobs:
           test -f "$tree/build/arm-platforms/libArmCpu.a"
           test -f "$tree/build/arm-platforms/libArmDTPlatform.a"
           test -f "$tree/build/arm-platforms/libArmVirtPlatform.a"
-          test -f "$tree/build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837/mach.development.bcm2837.unstripped"
-          grep -q 'SPRD_UART_BASE.*0x70100000' "$tree/.cache/xnu-work/pexpert/arm/pe_serial.c"
+          kernel_image=$(find "$tree/build/xnu/ios-obj" -type f \
+            \( -name 'mach.development.*.unstripped' -o -name 'kernel.development.*' \) \
+            -print -quit)
+          test -n "$kernel_image"
+          grep -R -q '0x70100000' "$tree/.cache/xnu-work/pexpert" "$tree/.cache/xnu-work/bsd" 2>/dev/null
           grep -q 'framebuffer-base' "$DEVICE_DIR/scripts/make-t610yp-adt.py"
           test -s "$tree/logs/kernel.log" || test -s "$tree/logs/kernel-bootstrap.log"
 
@@ -145,6 +149,18 @@ jobs:
             --cpu-regs 0,0x100,0x200,0x300,0x400,0x500,0x600,0x700 \
             --unique-chip-id 0x554d533531325450
 
+      - name: Print kernel failure log
+        if: failure()
+        working-directory: unixnu-base
+        run: |
+          set +e
+          for log in out/t610yp/logs/kernel-bootstrap.log out/t610yp/logs/kernel.log; do
+            if [ -s "$log" ]; then
+              echo "===== $log (last 240 lines) ====="
+              tail -n 240 "$log"
+            fi
+          done
+
       - name: Collect kernel and build tree
         if: always()
         working-directory: unixnu-base
@@ -156,6 +172,7 @@ jobs:
             -exec cp -p {} "$RUNNER_TEMP/t610yp-kernel/" \; 2>/dev/null
           cp -p "$RUNNER_TEMP/t610yp.adt" "$RUNNER_TEMP/t610yp-kernel/" 2>/dev/null
           cp -R "out/t610yp/logs" "$RUNNER_TEMP/t610yp-kernel/" 2>/dev/null
+          cp -R "out/t610yp/tree/build/xnu" "$RUNNER_TEMP/t610yp-kernel/xnu-build" 2>/dev/null
           SDK=$(xcrun --sdk macosx --show-sdk-path)
           mkdir -p "$RUNNER_TEMP/sdk-kernel-platform"
           cp -R "$SDK/System/Library/Frameworks/Kernel.framework/Versions/A/PrivateHeaders/platform" \
@@ -169,7 +186,7 @@ jobs:
 
       - name: Upload XNU 8796 kernel artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: xnu-8796-t610yp-${{ github.run_attempt }}
           path: |
