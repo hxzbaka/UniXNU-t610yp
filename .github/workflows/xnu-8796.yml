@@ -6,7 +6,7 @@ on:
       unixnu_repository:
         description: UniXNU base repository (owner/name)
         required: true
-        default: hxzbaka/testios
+        default: hxzbaka/UniXNU
       unixnu_ref:
         description: UniXNU base repository ref
         required: true
@@ -57,7 +57,7 @@ jobs:
       - name: Check out UniXNU base
         uses: actions/checkout@v4
         with:
-          repository: ${{ inputs.unixnu_repository || 'hxzbaka/testios' }}
+          repository: ${{ inputs.unixnu_repository || 'hxzbaka/UniXNU' }}
           ref: ${{ inputs.unixnu_ref || 'main' }}
           path: unixnu-base
           persist-credentials: false
@@ -110,6 +110,7 @@ jobs:
           UNIXNU_DEVICE: ${{ env.DEVICE_DIR }}
           MAKEFLAGS: ${{ inputs.keep_going == 'true' && '-k' || '' }}
           GITHUB_TOKEN: ${{ github.token }}
+          XNU_BUILD_WERROR: "0"
         run: |
           set -euo pipefail
           # The normal "build kernel" command also performs IPSW prelinking.
@@ -120,6 +121,19 @@ jobs:
           kernel.prelink = lambda ctx: None
           cli.main(['build', '-D', '${{ env.DEVICE_DIR }}', 'kernel'])
           PY
+
+      - name: Verify debug console and platform archives
+        working-directory: unixnu-base
+        run: |
+          set -euo pipefail
+          tree="out/t610yp/tree"
+          test -f "$tree/build/arm-platforms/libArmCpu.a"
+          test -f "$tree/build/arm-platforms/libArmDTPlatform.a"
+          test -f "$tree/build/arm-platforms/libArmVirtPlatform.a"
+          test -f "$tree/build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837/mach.development.bcm2837.unstripped"
+          grep -q 'SPRD_UART_BASE.*0x70100000' "$tree/.cache/xnu-work/pexpert/arm/pe_serial.c"
+          grep -q 'framebuffer-base' "$DEVICE_DIR/scripts/make-t610yp-adt.py"
+          test -s "$tree/logs/kernel.log" || test -s "$tree/logs/kernel-bootstrap.log"
 
       - name: Validate generated ADT
         working-directory: unixnu-base

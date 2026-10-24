@@ -69,6 +69,7 @@ for index, reg in enumerate(regs):
 
 chosen = [prop('random-seed', os.urandom(64)), prop('dram-base', u64(0x40000000)),
           prop('dram-size', u64(args.dram_size)), prop('osenvironment', b'main\0'),
+          prop('framebuffer-base', u64(0x9e000000)), prop('framebuffer-size', u64(0x01000000)),
           prop('unique-chip-id', u64(args.unique_chip_id)), prop('chip-id', u32(args.chip_id)),
           prop('crypto-hash-method', b'sha2-384\0'), *nvram_proxy()]
 if args.owned_memory_size:
@@ -86,16 +87,19 @@ memory_map = [node('memory-map', [prop('RAMDisk', bytes(16)), prop('PackedRAMDis
 arm_io = node('arm-io', [prop('device_type', b'arm-io\0'), prop('#address-cells', u32(2)),
     prop('#size-cells', u32(2)), prop('ranges', struct.pack('<QQQ', 0, 0x12000000, 0x5f000000))], [
     node('intc', [prop('compatible', b'arm,gic-v3\0'),
-        prop('reg', struct.pack('<QQQQ', 0, 0, 0x40000, 0x400000)),
+        prop('reg', struct.pack('<QQQQ', 0, 0x20000, 0x40000, 0x100000)),
         prop('redistributor-stride', u64(0x20000)), prop('#redistributor-regions', u32(1)),
-        prop('#address-cells', u32(2)), prop('#size-cells', u32(2)), prop('interrupt-controller', b'')]),
+        prop('#address-cells', u32(2)), prop('#size-cells', u32(2)),
+        prop('interrupt-controller', b''), prop('interrupts', struct.pack('<III', 1, 9, 4))]),
     node('timer', [prop('compatible', b'arm,armv8-timer\0'),
         prop('interrupts', struct.pack('<12I', 1, 13, 4, 1, 14, 4, 1, 11, 4, 1, 10, 4))]),
     node('pmu', [prop('compatible', b'arm,armv8-pmuv3\0'),
         prop('interrupts', struct.pack('<24I', 0, 0x70, 4, 0, 0x71, 4, 0, 0x72, 4, 0, 0x73, 4,
                                        0, 0x74, 4, 0, 0x75, 4, 0, 0x76, 4, 0, 0x77, 4))]),
     node('uart0', [prop('compatible', b'sprd,ums512-uart\0'),
-        prop('reg', struct.pack('<QQ', 0x5e100000, 0x1000)), prop('clock-always-on', u32(1))])])
+        prop('reg', struct.pack('<QQ', 0x5e100000, 0x1000)), prop('clock-always-on', u32(1))]),
+    node('framebuffer', [prop('compatible', b'uefi,framebuffer\0'),
+        prop('reg', struct.pack('<QQ', 0x9e000000, 0x01000000))])])
 
 tree = node('device-tree', [prop('model', b'SharkL5Pro T610YP\0'),
     prop('compatible', b'unisoc,ums512\0sprd,sharkl5pro\0')], [
