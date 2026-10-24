@@ -57,7 +57,7 @@ jobs:
       - name: Check out UniXNU base
         uses: actions/checkout@v4
         with:
-          repository: ${{ inputs.unixnu_repository || 'hxzbaka/UniXNU' }}
+          repository: ${{ inputs.unixnu_repository || 'hxzbaka/testios' }}
           ref: ${{ inputs.unixnu_ref || 'main' }}
           path: unixnu-base
           persist-credentials: false
