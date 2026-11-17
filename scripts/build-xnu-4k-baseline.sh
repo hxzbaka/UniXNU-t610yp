@@ -58,6 +58,7 @@ for PATCH in "$ROOT"/patches/xnu/*.patch "$ROOT"/patches/ums512/*.patch "$ROOT"/
     esac
   fi
   if ! git -C .cache/xnu-work apply --reverse --check "$PATCH" >/dev/null 2>&1; then
+    echo "PATCH YANG DIPERIKSA: $(basename "$PATCH")"
     git -C .cache/xnu-work apply --check "$PATCH"
     git -C .cache/xnu-work apply "$PATCH"
   fi
